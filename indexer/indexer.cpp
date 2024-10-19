@@ -10,7 +10,7 @@ void Indexer::parse_refs(const std::string& useragent, const std::string& accept
 {
 	auto words_begin = std::sregex_iterator(HtmlContent.begin(), HtmlContent.end(), word_regex);
 	auto words_end = std::sregex_iterator();
-	std::string buf; int sl{ 0 };
+	std::string buf; long sl{ 0 };
 
 	for (std::sregex_iterator i = words_begin; i != words_end; ++i)
 	{
@@ -22,7 +22,7 @@ void Indexer::parse_refs(const std::string& useragent, const std::string& accept
 		buf = match[2];
 		if (buf.find("www.", 0) == 0) { buf.replace(0, 4, ""); }
 		sl = buf.find("/", 0);
-		if (sl == std::string::npos)
+		if (sl == -1)
 		{
 			lnk.hostName = buf;
 			lnk.query = '/';

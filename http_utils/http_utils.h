@@ -29,4 +29,6 @@ public:
 	~http_request();
 	std::string getHtmlContent(const Link& link);
 private:
+	Link redirect(http::response<http::dynamic_body>& res, const Link& link);
+	unsigned short recv_counter{ 0 };
 };

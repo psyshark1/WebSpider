@@ -2,7 +2,7 @@
 #include"stringstructs.h"
 #include"INI_parser.h"
 #include"thread_pool.h"
-#include "http_server.h"
+#include <tlhelp32.h>
 
 //std::atomic<unsigned>idword{ 1 };
 //std::atomic<unsigned>idref{ 1 };
@@ -11,17 +11,28 @@ std::mutex m;
 std::condition_variable cv;
 std::map<std::string, Link> maplink;
 
-void httpServer(tcp::acceptor& acceptor, tcp::socket& socket, std::string& dbTblDocsName, std::string& dbTblWordsName, std::string& dbTblIndexerName, pqxx::nontransaction& nt)
+bool getWinHandle(const char* proc)
 {
-	acceptor.async_accept(socket,
-		[&](beast::error_code ec)
+	bool r{ false };
+	PROCESSENTRY32 entry;
+	entry.dwSize = sizeof(PROCESSENTRY32);
+
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+
+	if (Process32First(snapshot, &entry) == TRUE)
+	{
+		while (Process32Next(snapshot, &entry) == TRUE)
 		{
-			if (!ec)
+			if (stricmp(entry.szExeFile, proc) == 0)
 			{
-				std::make_shared<http_server>(std::move(socket), std::move(&dbTblDocsName), std::move(&dbTblWordsName), std::move(&dbTblIndexerName), std::move(&nt))->start();
-				httpServer(acceptor, socket, dbTblDocsName, dbTblWordsName, dbTblIndexerName, nt);
+				HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID);
+				r = true;
+				CloseHandle(hProcess);
 			}
-		});
+		}
+	}
+	CloseHandle(snapshot);
+	return r;
 }
 
 int main()
@@ -29,6 +40,12 @@ int main()
 	SetConsoleCP(CP_UTF8);
 	SetConsoleOutputCP(CP_UTF8);
 	std::system("chcp 1251");
+
+	STARTUPINFO si;
+	PROCESS_INFORMATION pi;
+	ZeroMemory(&si, sizeof(si));
+	si.cb = sizeof(si);
+	ZeroMemory(&pi, sizeof(pi));
 
 	try
 	{
@@ -40,21 +57,66 @@ int main()
 
 		const std::string serverHost = parser.get_value<std::string>(inistr.ServerHost);
 		
-		const std::string starturl = parser.get_value<std::string>(inistr.StartURL);
-		
-		std::string accept = parser.get_value<std::string>(inistr.accept);
-		std::string useragent = parser.get_value<std::string>(inistr.useragent);
+		std::string starturl = parser.get_value<std::string>(inistr.StartURL);
+		const std::string accept = parser.get_value<std::string>(inistr.accept);
+		const std::string useragent = parser.get_value<std::string>(inistr.useragent);
 
-		const std::string connstr = dbstr.user + parser.get_value<std::string>(inistr.user) + ' ' +
-			dbstr.host + parser.get_value<std::string>(inistr.host) + ' ' +
-			dbstr.password + parser.get_value<std::string>(inistr.password) + ' ' +
-			dbstr.dbname + parser.get_value<std::string>(inistr.dbname);
+		Link lnk;
+		{
+			if (starturl.find("https", 0) == 0)
+			{
+				lnk.protocol = ProtocolType::HTTPS;
+			}
+			else if (starturl.find("http", 0) == 0)
+			{
+				lnk.protocol = ProtocolType::HTTP;
+			}
+			else
+			{
+				throw std::exception(inistr.StartURLERR);
+			}
+
+			long sls = starturl.find("://", 0);
+			if (sls == -1)
+			{
+				throw std::exception(inistr.StartURLERR);
+			}
+			else
+			{
+				long dot = starturl.find(".", sls);
+				if(dot == -1){ throw std::exception(inistr.StartURLERR); }
+				long sl = starturl.find('/', sls+3);
+				if (sl == -1)
+				{
+					lnk.hostName = starturl.substr(sls+3);
+					lnk.query = '/';
+					starturl.push_back('/'); 
+				}
+				else
+				{
+					lnk.hostName = starturl.substr(sls+3, sl-sls-3);
+					lnk.query = starturl.substr(sl);
+				}
+			}
+		}
+		lnk.accept = accept; lnk.useragent = useragent;
+
+		const std::string postgresuser = parser.get_value<std::string>(inistr.user);
+		const std::string postgreshost = parser.get_value<std::string>(inistr.host);
+		const std::string postgrespass = parser.get_value<std::string>(inistr.password);
+		const std::string postgresdbname = parser.get_value<std::string>(inistr.dbname);
+
+		const std::string connstr = dbstr.user + postgresuser + ' ' +
+			dbstr.host + postgreshost + ' ' +
+			dbstr.password + postgrespass + ' ' +
+			dbstr.dbname + postgresdbname;
+
 		pqxx::connection dbcon(connstr);
 		pqxx::work w(dbcon);
 
+		w.exec(requests.DropTableIndexer);
 		w.exec(requests.DropTableDocs);
 		w.exec(requests.DropTableWords);
-		w.exec(requests.DropTableIndexer);
 		w.exec(requests.CreateTableDocs);
 		w.exec(requests.CreateTableWords);
 		w.exec(requests.CreateTableIndexer);
@@ -63,10 +125,10 @@ int main()
 
 		http_request httpreq;
 
-		maplink[starturl + '/'] = { ProtocolType::HTTPS, starturl, "/", accept, useragent };
+		maplink[starturl] = lnk;
 		
 		Indexer* idx{ new Indexer() };
-		if (idx->get_http(&dbcon, dbstr.dbTblDocsName, &httpreq, starturl + '/', maplink[starturl + '/']))
+		if (idx->get_http(&dbcon, dbstr.dbTblDocsName, &httpreq, starturl, maplink[starturl]))
 		{
 			idx->parse_refs(accept, useragent);
 			idx->create_wordsbase();
@@ -76,6 +138,17 @@ int main()
 				maplink = idx->getLinks();
 				idx->clear();
 
+
+				std::string startserver = ' ' + serverHost + ' ' + std::to_string(serverPort) + ' ' +
+					postgresuser + ' ' + postgreshost + ' ' + postgrespass + ' ' + postgresdbname + ' ' +
+					dbstr.dbTblDocsName + ' ' + dbstr.dbTblWordsName + ' ' + dbstr.dbTblIndexerName;
+				if (!getWinHandle(dbstr.httpServerexec))
+				{
+					if (!CreateProcess(dbstr.httpServerexec, &startserver.front(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+					{
+						throw std::exception(dbstr.httpServerERRmsg);
+					}
+				}
 				if (searchdepth > 1)
 				{
 					if (maplink.size())
@@ -118,27 +191,19 @@ int main()
 				}
 				maplink.clear();
 
-				auto const address = net::ip::make_address(serverHost);
-
-				net::io_context ioc{ 1 };
-
-				tcp::acceptor acceptor{ ioc, { address, serverPort } };
-				tcp::socket socket{ ioc };
-				std::string dbTblDocsName = dbstr.dbTblDocsName;
-				std::string dbTblWordsName = dbstr.dbTblWordsName;
-				std::string dbTblIndexerName = dbstr.dbTblIndexerName;
 				pqxx::nontransaction nw(dbcon);
-				httpServer(acceptor, socket, dbTblDocsName, dbTblWordsName, dbTblIndexerName, nw);
-
 				nw.exec("begin;");
 				pqxx::result rs = nw.exec("SELECT COUNT(id) FROM " + std::string(dbstr.dbTblDocsName));
 				pqxx::result rs1 = nw.exec("SELECT COUNT(id) FROM " + std::string(dbstr.dbTblWordsName));
 				nw.exec("commit;");
-				rs[0][0].as<unsigned>();
-				std::cout << "Found " << rs1[0][0].as<unsigned>() << " word(s) in " << rs[0][0].as<unsigned>() << " HTML Document(s)" << std::endl 
+
+				std::cout << "Parcing Complete" << std::endl << "Found " << rs1[0][0].as<unsigned>() << " word(s) in " << rs[0][0].as<unsigned>() << " HTML Document(s)" << std::endl
 					<< "Open browser and connect to http://" << serverHost << ":" << serverPort << " to see the web server operating" << std::endl;
 
-				ioc.run();
+				WaitForSingleObject(pi.hProcess, INFINITE);
+
+				CloseHandle(pi.hProcess);
+				CloseHandle(pi.hThread);
 			}
 		}
 		else

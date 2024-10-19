@@ -66,7 +66,7 @@ public:
 		cv_dat.notify_all();
 	}
 
-	void stop() noexcept
+	inline void stop() noexcept
 	{
 		exit = true;
 		notify();

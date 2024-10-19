@@ -34,7 +34,7 @@ std::string http_request::getHtmlContent(const Link& link)
 			get_lowest_layer(stream).connect(resolver.resolve({ link.hostName, "https"}));
 			get_lowest_layer(stream).expires_after(std::chrono::seconds(30));
 			http::request<http::empty_body> req{ http::verb::get, link.query, 11 };
-			(link.query.length() > 1) ? req.set(http::field::host, link.hostName) : req.set(http::field::host, "www." + link.hostName);
+			req.set(http::field::host, link.hostName);
 			req.set(http::field::user_agent, link.useragent);
 			req.set(http::field::accept, link.accept);
 
@@ -45,7 +45,36 @@ std::string http_request::getHtmlContent(const Link& link)
 			http::response<http::dynamic_body> res;
 			http::read(stream, buffer, res);
 
-			result = buffers_to_string(res.body().data());
+			if (res.result_int() == 301 || res.result_int() == 302)
+			{
+				++recv_counter;
+				if (recv_counter == 5) { recv_counter = 0; return "no data"; }
+				return getHtmlContent(redirect(res, link));
+			}
+			else if (res.result_int() == 200)
+			{
+				result = buffers_to_string(res.body().data());
+				if (result.find("301 Moved Permanently", 0) != std::string::npos && result.length() < 250)
+				{
+					++recv_counter;
+					if (recv_counter == 5) { recv_counter = 0; return "no data"; }
+					Link lnk = link;
+					lnk.protocol = ProtocolType::HTTPS;
+					return getHtmlContent(lnk);
+				}
+			}
+			else if (res.result_int() == 307)
+			{
+				++recv_counter;
+				if (recv_counter == 5) { recv_counter = 0; return "no data"; }
+				std::string loc = res.base()["Location"];
+				Link lnk = link; lnk.query = loc;
+				return getHtmlContent(lnk);
+			}
+			else
+			{
+				result = buffers_to_string(res.body().data());
+			}
 
 			beast::error_code ec;
 			stream.shutdown(ec);
@@ -68,7 +97,7 @@ std::string http_request::getHtmlContent(const Link& link)
 			stream.connect(results);
 
 			http::request<http::string_body> req{ http::verb::get, link.query, 11 };
-			req.set(http::field::host, "www." + link.hostName);
+			req.set(http::field::host, link.hostName);
 			req.set(http::field::user_agent, link.useragent);
 			req.set(http::field::accept, link.accept);
 
@@ -76,10 +105,27 @@ std::string http_request::getHtmlContent(const Link& link)
 
 			beast::flat_buffer buffer;
 			http::response<http::dynamic_body> res;
-
 			http::read(stream, buffer, res);
 
-			result = buffers_to_string(res.body().data());
+			if (res.result_int() == 301 || res.result_int() == 302)
+			{
+				++recv_counter;
+				if (recv_counter == 5) { recv_counter = 0; return "no data"; }
+				return getHtmlContent(redirect(res, link));
+			}
+			else if (res.result_int() == 200)
+			{
+				result = buffers_to_string(res.body().data());
+				if (result.find("301 Moved Permanently", 0) != std::string::npos && result.length() < 250)
+				{
+					++recv_counter;
+					if (recv_counter == 5) { recv_counter = 0; return "no data"; }
+					Link lnk = link;
+					lnk.protocol = ProtocolType::HTTPS;
+					return getHtmlContent(lnk);
+				}
+			}
+
 			beast::error_code ec;
 			stream.socket().shutdown(tcp::socket::shutdown_both, ec);
 
@@ -102,7 +148,51 @@ std::string http_request::getHtmlContent(const Link& link)
 	{
 		return result;
 	}
-	
+}
+
+inline Link http_request::redirect(http::response<http::dynamic_body>& res, const Link& link)
+{
+	Link lnk;
+
+	std::string loc = res.base()["Location"];
+	if (loc.find("https", 0) == 0)
+	{
+		lnk.protocol = ProtocolType::HTTPS;
+	}
+	else if (loc.find("http", 0) == 0)
+	{
+		lnk.protocol = ProtocolType::HTTP;
+	}
+	else
+	{
+		lnk.protocol = ProtocolType::HTTPS;
+	}
+
+	long sls = loc.find("://", 0);
+	if (sls == -1)
+	{
+		lnk.hostName = link.hostName;
+		lnk.query = loc;
+	}
+	else
+	{
+		long dot = loc.find(".", sls);
+		if (dot == -1) { throw std::exception("No domain dot separate!");}
+		long sl = loc.find('/', sls + 3);
+		if (sl == -1)
+		{
+			lnk.hostName = loc.substr(sls + 3);
+			lnk.query = '/';
+			loc.push_back('/');
+		}
+		else
+		{
+			lnk.hostName = loc.substr(sls + 3, sl - sls - 3);
+			lnk.query = loc.substr(sl);
+		}
+	}
+	lnk.accept = link.accept; lnk.useragent = link.useragent;
+	return lnk;
 }
 
 http_request::~http_request()
