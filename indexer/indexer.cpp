@@ -6,7 +6,7 @@ Indexer::Indexer()
 	locale_init();
 }
 
-void Indexer::parse_refs(const std::string& useragent, const std::string& accept) noexcept
+void Indexer::parse_refs(const Link& link) noexcept
 {
 	auto words_begin = std::sregex_iterator(HtmlContent.begin(), HtmlContent.end(), word_regex);
 	auto words_end = std::sregex_iterator();
@@ -15,25 +15,73 @@ void Indexer::parse_refs(const std::string& useragent, const std::string& accept
 	for (std::sregex_iterator i = words_begin; i != words_end; ++i)
 	{
 		Link lnk;
+		lnk.accept = link.accept; lnk.useragent = link.useragent;
 		std::smatch match = *i;
 		buf = match[1];
-		(buf.find("https", 0) == std::string::npos) ? lnk.protocol = ProtocolType::HTTP : lnk.protocol = ProtocolType::HTTPS;
-		buf.clear();
-		buf = match[2];
-		if (buf.find("www.", 0) == 0) { buf.replace(0, 4, ""); }
-		sl = buf.find("/", 0);
-		if (sl == -1)
+		if (buf.size())
 		{
-			lnk.hostName = buf;
-			lnk.query = '/';
+			(buf.find("https", 0) == std::string::npos) ? lnk.protocol = ProtocolType::HTTP : lnk.protocol = ProtocolType::HTTPS;
+			buf.clear();
+			buf = match[2];
+			if (buf.find("www.", 0) == 0) { buf.replace(0, 4, ""); }
+			sl = buf.find("/", 0);
+			if (sl == -1)
+			{
+				lnk.hostName = buf;
+				lnk.query = '/';
+			}
+			else
+			{
+				lnk.hostName = buf.substr(0, sl);
+				lnk.query = buf.substr(sl);
+			}
+			
+			this->links[match[1].str() + match[2].str()] = lnk;
 		}
 		else
 		{
-			lnk.hostName = buf.substr(0, sl);
-			lnk.query = buf.substr(sl);
+			lnk.protocol = link.protocol;
+			buf.clear();
+			buf = match[2];
+			sl = buf.find("//", 0);
+			if (sl == 0)
+			{
+				buf.erase(0, 2);
+				if (buf.rfind('/') == buf.length()-1)
+				{ 
+					buf.erase(buf.length()-1, 1);
+				}
+				lnk.hostName = buf;
+				lnk.query = '/';
+				if (lnk.protocol == ProtocolType::HTTPS)
+				{
+					this->links["https://" + lnk.hostName] = lnk;
+				}
+				else
+				{
+					this->links["http://" + lnk.hostName] = lnk;
+				}
+			}
+			else if (sl == -1)
+			{
+				sl = buf.find("/", 0);
+				if (sl == -1 || sl > 0) { return; }
+				lnk.hostName = link.hostName;
+				lnk.query = buf;
+				if (lnk.protocol == ProtocolType::HTTPS)
+				{
+					this->links["https://" + lnk.hostName + buf] = lnk;
+				}
+				else
+				{
+					this->links["http://" + lnk.hostName + buf] = lnk;
+				}
+			}
+			else
+			{
+				return;
+			}
 		}
-		lnk.accept = accept; lnk.useragent = useragent;
-		this->links[match[1].str() + match[2].str()] = lnk;
 	}
 }
 
@@ -46,7 +94,7 @@ bool Indexer::addToDB(pqxx::connection* conn, const std::string& wordsdbName, co
 {
 	try
 	{
-		if (conn == nullptr ) { throw std::exception("Connection to Database not established!"); }
+		if (conn == nullptr ) { throw std::runtime_error("Connection to Database not established!"); }
 		if (!words.size()) { std::cerr << "No words found in " << url << std::endl; return false; }
 
 		pqxx::nontransaction nw(*conn);
@@ -67,9 +115,10 @@ bool Indexer::addToDB(pqxx::connection* conn, const std::string& wordsdbName, co
 		nw.exec("commit;");
 		return true;
 	}
-	catch (std::exception const& e)
+	catch (std::runtime_error const& re)
 	{
-		std::cerr << "SQL ERROR: " << e.what() << std::endl;
+		std::cerr << "SQL ERROR: " << re.what() << std::endl;
+		++DBerr_counter;
 	}
 	return false;
 }
@@ -85,7 +134,15 @@ bool Indexer::get_http(pqxx::connection* conn, const std::string& docsdbName, ht
 		{
 			this->url = url;
 			HtmlContent = httpreq->getHtmlContent(lnk);
-			if (HtmlContent == "no data"){ return false; }
+			httpreq->reset_redirects_cnt();
+			if (HtmlContent == "no data")
+			{ 
+				++HTTPerr_counter; return false;
+			}
+			else if (HtmlContent == "notHTML")
+			{
+				return false;
+			}
 			boost::locale::to_lower(this->HtmlContent);
 			return true;
 		}
@@ -94,11 +151,22 @@ bool Indexer::get_http(pqxx::connection* conn, const std::string& docsdbName, ht
 			return false;
 		}
 	}
-	catch (const std::exception& e)
+	catch (const pqxx::usage_error ue)
 	{
-		std::cerr << "get_http ERROR: " << e.what() << '\n';
+		std::cerr << "get_http SQL ERROR: " << ue.what() << std::endl;
+		++DBerr_counter;
 		return false;
 	}
+}
+
+const unsigned short& Indexer::get_DBerr_counter()
+{
+	return DBerr_counter;
+}
+
+const unsigned short& Indexer::get_HTTPerr_counter()
+{
+	return HTTPerr_counter;
 }
 
 void Indexer::clear() noexcept

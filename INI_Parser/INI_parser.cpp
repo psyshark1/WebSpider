@@ -55,7 +55,7 @@ void ini_parser::read_file(const std::string& fpath)
 
 	if (!file.is_open())
 	{
-		throw std::exception("Unable to open INI file!");
+		throw std::runtime_error("Unable to open INI file!");
 	}
 
 	while (std::getline(file, sline))

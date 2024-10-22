@@ -11,6 +11,10 @@
 #include <iostream>
 #include "lnk.h"
 
+#ifndef MAX_REDIRECT
+#define MAX_REDIRECT 5
+#endif
+
 namespace ssl = boost::asio::ssl;
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -28,6 +32,7 @@ public:
 	http_request& operator= (const http_request&) = delete;
 	~http_request();
 	std::string getHtmlContent(const Link& link);
+	void reset_redirects_cnt();
 private:
 	Link redirect(http::response<http::dynamic_body>& res, const Link& link);
 	unsigned short recv_counter{ 0 };

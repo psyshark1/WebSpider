@@ -4,6 +4,14 @@
 #include<condition_variable>
 #include"indexer.h"
 
+#ifndef MAX_DBERRORS
+#define MAX_DBERRORS 5
+#endif
+
+#ifndef MAX_HTTPERRORS
+#define MAX_HTTPERRORS 5
+#endif
+
 template <class T>
 class safe_queue
 {
@@ -20,7 +28,7 @@ public:
 		//std::lock_guard lg{ m };
 		sq.push(std::move(tc));
 	};
-	void pop(std::map<std::string, Link>& maplink, std::mutex& m, Indexer* idx, pqxx::connection* conn, http_request* httpreq, const std::string& wordsdbName, const std::string& docsdbName, const std::string& indexdbName, const std::string& useragent, const std::string& accept)
+	void pop(std::map<std::string, Link>& maplink, std::mutex& m, Indexer* idx, pqxx::connection* conn, http_request* httpreq, const std::string& wordsdbName, const std::string& docsdbName, const std::string& indexdbName)
 	{
 		std::map<std::string, Link> mlinks;
 		std::unique_lock ul{ m };
@@ -36,7 +44,7 @@ public:
 				if (idx->get_http(conn, docsdbName, httpreq, entity.first, entity.second))
 				{
 					ul.unlock();
-					idx->parse_refs(useragent, accept);
+					idx->parse_refs(entity.second);
 					mlinks = idx->getLinks();
 					idx->create_wordsbase();
 					ul.lock();
@@ -51,6 +59,24 @@ public:
 							mlinks.clear();
 						}
 					}
+					else
+					{
+						if (idx->get_DBerr_counter() == MAX_DBERRORS)
+						{ 
+							std::cerr << "The maximum number of exceptions when accessing the database has been exceeded. Thread " << std::this_thread::get_id() << 
+								" has been terminated!" << std::endl;
+							break;
+						}
+					}
+				}
+				else
+				{
+					if (idx->get_HTTPerr_counter() == MAX_HTTPERRORS)
+					{
+						std::cerr << "The maximum number of network connection exceptions has been exceeded. Thread " << std::this_thread::get_id() <<
+							" has been terminated!" << std::endl;
+						break;
+					}
 				}
 				ul.unlock();
 				idx->clear();
@@ -59,6 +85,7 @@ public:
 			m_cv->notify_one();
 			if (exit) { break; }
 		}
+		(ul.owns_lock()) ? ul.unlock() : false;
 	};
 
 	inline void notify() noexcept
@@ -75,6 +102,11 @@ public:
 	size_t get_size() noexcept
 	{
 		return sq.size();
+	}
+
+	const bool& get_exit_status() noexcept
+	{
+		return exit;
 	}
 private:
 	std::queue<T> sq;

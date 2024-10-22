@@ -48,7 +48,7 @@ std::string http_request::getHtmlContent(const Link& link)
 			if (res.result_int() == 301 || res.result_int() == 302)
 			{
 				++recv_counter;
-				if (recv_counter == 5) { recv_counter = 0; return "no data"; }
+				if (recv_counter == MAX_REDIRECT) { throw std::runtime_error("Looping Redirect!"); }
 				return getHtmlContent(redirect(res, link));
 			}
 			else if (res.result_int() == 200)
@@ -57,7 +57,7 @@ std::string http_request::getHtmlContent(const Link& link)
 				if (result.find("301 Moved Permanently", 0) != std::string::npos && result.length() < 250)
 				{
 					++recv_counter;
-					if (recv_counter == 5) { recv_counter = 0; return "no data"; }
+					if (recv_counter == MAX_REDIRECT) { throw std::runtime_error("Looping Redirect!"); }
 					Link lnk = link;
 					lnk.protocol = ProtocolType::HTTPS;
 					return getHtmlContent(lnk);
@@ -66,7 +66,7 @@ std::string http_request::getHtmlContent(const Link& link)
 			else if (res.result_int() == 307)
 			{
 				++recv_counter;
-				if (recv_counter == 5) { recv_counter = 0; return "no data"; }
+				if (recv_counter == MAX_REDIRECT) { throw std::runtime_error("Looping Redirect!"); }
 				std::string loc = res.base()["Location"];
 				Link lnk = link; lnk.query = loc;
 				return getHtmlContent(lnk);
@@ -110,7 +110,7 @@ std::string http_request::getHtmlContent(const Link& link)
 			if (res.result_int() == 301 || res.result_int() == 302)
 			{
 				++recv_counter;
-				if (recv_counter == 5) { recv_counter = 0; return "no data"; }
+				if (recv_counter == MAX_REDIRECT) { throw std::runtime_error("Looping Redirect!"); }
 				return getHtmlContent(redirect(res, link));
 			}
 			else if (res.result_int() == 200)
@@ -119,7 +119,7 @@ std::string http_request::getHtmlContent(const Link& link)
 				if (result.find("301 Moved Permanently", 0) != std::string::npos && result.length() < 250)
 				{
 					++recv_counter;
-					if (recv_counter == 5) { recv_counter = 0; return "no data"; }
+					if (recv_counter == MAX_REDIRECT) { throw std::runtime_error("Looping Redirect!"); }
 					Link lnk = link;
 					lnk.protocol = ProtocolType::HTTPS;
 					return getHtmlContent(lnk);
@@ -135,19 +135,24 @@ std::string http_request::getHtmlContent(const Link& link)
 			}
 		}
 	}
-	catch (const std::exception& e)
+	catch (const std::runtime_error& re)
 	{
-		std::cout << link.hostName << link.query << std::endl << e.what() << std::endl;
+		std::cout << "HTTP Client ERROR: " << link.hostName << link.query << std::endl << re.what() << std::endl;
 		return "no data";
 	}
 	if (result.find("<html", 0) == std::string::npos && result.find("<body", 5) == std::string::npos)
 	{
-		return "no data";
+		return "notHTML";
 	}
 	else
 	{
 		return result;
 	}
+}
+
+void http_request::reset_redirects_cnt()
+{
+	recv_counter = 0;
 }
 
 inline Link http_request::redirect(http::response<http::dynamic_body>& res, const Link& link)
@@ -177,7 +182,7 @@ inline Link http_request::redirect(http::response<http::dynamic_body>& res, cons
 	else
 	{
 		long dot = loc.find(".", sls);
-		if (dot == -1) { throw std::exception("No domain dot separate!");}
+		if (dot == -1) { throw std::runtime_error("No domain dot separate!");}
 		long sl = loc.find('/', sls + 3);
 		if (sl == -1)
 		{

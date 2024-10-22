@@ -10,7 +10,7 @@
 class thread_pool
 {
 public:
-	thread_pool(const std::string& connstr, std::map<std::string, Link>& mlink, std::condition_variable* mcv, std::mutex& m, const std::string& wordsdbName, const std::string& docsdbName, const std::string& indexdbName, const std::string& useragent, const std::string& accept);
+	thread_pool(const std::string& connstr, std::map<std::string, Link>& mlink, std::condition_variable* mcv, std::mutex& m, const std::string& wordsdbName, const std::string& docsdbName, const std::string& indexdbName);
 	thread_pool(const thread_pool&) = delete;
 	thread_pool(thread_pool&) = delete;
 	thread_pool& operator= (thread_pool&) = delete;
@@ -21,12 +21,14 @@ public:
 	void go();
 	void stop();
 	size_t get_queue_size();
+	const unsigned int& get_emrg_exit_counter();
 private:
-	void work(const std::string& connstr, std::map<std::string, Link>& maplink, std::mutex& m, const std::string& wordsdbName, const std::string& docsdbName, const std::string& indexdbName, const std::string& useragent, const std::string& accept);
+	void work(const std::string& connstr, std::map<std::string, Link>& maplink, std::mutex& m, std::condition_variable* mcv, const std::string& wordsdbName, const std::string& docsdbName, const std::string& indexdbName);
 	const std::string wordsdbName;
 	const std::string docsdbName;
 	const std::string indexdbName;
 	std::vector<std::thread> vths;
 	safe_queue<std::pair<std::string, Link>> safeq;
 	std::map<std::string, Link>* mlink;
+	unsigned int emrg_exit_counter{ 0 };
 };

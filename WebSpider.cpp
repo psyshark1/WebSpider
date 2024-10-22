@@ -47,20 +47,21 @@ int main()
 	si.cb = sizeof(si);
 	ZeroMemory(&pi, sizeof(pi));
 
+	Indexer* idx{ nullptr };
 	try
 	{
-		ini_parser parser("WebSpider.ini");
+		ini_parser parser(inistr.INIFile);
 		const int searchdepth = parser.get_value<int>(inistr.searchdepth);
-		if (searchdepth < 1) { throw std::exception("Search depth cannot be less than 1!"); }
+		if (searchdepth < 1) { throw std::runtime_error("Search depth cannot be less than 1!"); }
 		const unsigned short serverPort = parser.get_value<int>(inistr.ServerPort);
-		if (!serverPort) { throw std::exception("Server Port cannot be 0!"); }
+		if (!serverPort) { throw std::runtime_error("Server Port cannot be 0!"); }
 
 		const std::string serverHost = parser.get_value<std::string>(inistr.ServerHost);
 		
 		std::string starturl = parser.get_value<std::string>(inistr.StartURL);
 		const std::string accept = parser.get_value<std::string>(inistr.accept);
 		const std::string useragent = parser.get_value<std::string>(inistr.useragent);
-
+		
 		Link lnk;
 		{
 			if (starturl.find("https", 0) == 0)
@@ -73,18 +74,18 @@ int main()
 			}
 			else
 			{
-				throw std::exception(inistr.StartURLERR);
+				throw std::runtime_error(inistr.StartURLERR);
 			}
 
 			long sls = starturl.find("://", 0);
 			if (sls == -1)
 			{
-				throw std::exception(inistr.StartURLERR);
+				throw std::runtime_error(inistr.StartURLERR);
 			}
 			else
 			{
 				long dot = starturl.find(".", sls);
-				if(dot == -1){ throw std::exception(inistr.StartURLERR); }
+				if(dot == -1){ throw std::runtime_error(inistr.StartURLERR); }
 				long sl = starturl.find('/', sls+3);
 				if (sl == -1)
 				{
@@ -112,25 +113,26 @@ int main()
 			dbstr.dbname + postgresdbname;
 
 		pqxx::connection dbcon(connstr);
-		pqxx::work w(dbcon);
 
-		w.exec(requests.DropTableIndexer);
-		w.exec(requests.DropTableDocs);
-		w.exec(requests.DropTableWords);
-		w.exec(requests.CreateTableDocs);
-		w.exec(requests.CreateTableWords);
-		w.exec(requests.CreateTableIndexer);
-		w.commit();
-		w.~transaction();
+		{
+			pqxx::work w(dbcon);
+			w.exec(requests.DropTableIndexer);
+			w.exec(requests.DropTableDocs);
+			w.exec(requests.DropTableWords);
+			w.exec(requests.CreateTableDocs);
+			w.exec(requests.CreateTableWords);
+			w.exec(requests.CreateTableIndexer);
+			w.commit();
+		}
 
 		http_request httpreq;
 
 		maplink[starturl] = lnk;
 		
-		Indexer* idx{ new Indexer() };
+		idx = new Indexer();
 		if (idx->get_http(&dbcon, dbstr.dbTblDocsName, &httpreq, starturl, maplink[starturl]))
 		{
-			idx->parse_refs(accept, useragent);
+			idx->parse_refs(maplink[starturl]);
 			idx->create_wordsbase();
 			if (idx->addToDB(&dbcon, dbstr.dbTblWordsName, dbstr.dbTblDocsName, dbstr.dbTblIndexerName))
 			{
@@ -138,27 +140,30 @@ int main()
 				maplink = idx->getLinks();
 				idx->clear();
 
-
-				std::string startserver = ' ' + serverHost + ' ' + std::to_string(serverPort) + ' ' +
+				/*std::string startserver = ' ' + serverHost + ' ' + std::to_string(serverPort) + ' ' +
 					postgresuser + ' ' + postgreshost + ' ' + postgrespass + ' ' + postgresdbname + ' ' +
-					dbstr.dbTblDocsName + ' ' + dbstr.dbTblWordsName + ' ' + dbstr.dbTblIndexerName;
+					dbstr.dbTblDocsName + ' ' + dbstr.dbTblWordsName + ' ' + dbstr.dbTblIndexerName;*/
 				if (!getWinHandle(dbstr.httpServerexec))
 				{
-					if (!CreateProcess(dbstr.httpServerexec, &startserver.front(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+					if (!CreateProcess(dbstr.httpServerexec, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))//&startserver.front()
 					{
-						throw std::exception(dbstr.httpServerERRmsg);
+						throw std::runtime_error(dbstr.httpServerERRmsg);
 					}
 				}
 				if (searchdepth > 1)
 				{
 					if (maplink.size())
 					{
-						thread_pool thpool(connstr, maplink, &cv, m, dbstr.dbTblWordsName, dbstr.dbTblDocsName, dbstr.dbTblIndexerName, accept, useragent);
+						thread_pool thpool(connstr, maplink, &cv, m, dbstr.dbTblWordsName, dbstr.dbTblDocsName, dbstr.dbTblIndexerName);
 						int i = 1;
 						std::unique_lock ul{ m };
 						while (i <= searchdepth)
 						{
-							if (!maplink.empty() && !thpool.get_queue_size())
+							if (thpool.get_emrg_exit_counter() == std::thread::hardware_concurrency())
+							{
+								break;
+							}
+							else if (!maplink.empty() && !thpool.get_queue_size())
 							{
 								if (i < searchdepth)
 								{
@@ -183,7 +188,7 @@ int main()
 								break;
 							}
 							(!ul.owns_lock()) ? ul.lock() : false;
-							cv.wait(ul, [&]() {return (!maplink.empty() && !thpool.get_queue_size()) || (maplink.empty() && !thpool.get_queue_size()); });
+							cv.wait(ul, [&]() {return (!maplink.empty() && !thpool.get_queue_size()) || (maplink.empty() && !thpool.get_queue_size()) || (thpool.get_emrg_exit_counter() == std::thread::hardware_concurrency()); });
 							ul.unlock();
 						}
 						thpool.stop();
@@ -197,7 +202,7 @@ int main()
 				pqxx::result rs1 = nw.exec("SELECT COUNT(id) FROM " + std::string(dbstr.dbTblWordsName));
 				nw.exec("commit;");
 
-				std::cout << "Parcing Complete" << std::endl << "Found " << rs1[0][0].as<unsigned>() << " word(s) in " << rs[0][0].as<unsigned>() << " HTML Document(s)" << std::endl
+				std::cout << "Parsing Complete" << std::endl << "Found " << rs1[0][0].as<unsigned>() << " word(s) in " << rs[0][0].as<unsigned>() << " HTML Document(s)" << std::endl
 					<< "Open browser and connect to http://" << serverHost << ":" << serverPort << " to see the web server operating" << std::endl;
 
 				WaitForSingleObject(pi.hProcess, INFINITE);
@@ -210,10 +215,12 @@ int main()
 		{
 			std::cerr << "ERROR: No HTML document found in " << starturl << std::endl;
 		}
+		delete idx;
 	}
-	catch (std::exception const& e)
+	catch (std::runtime_error const& re)
 	{
-		std::cerr << "ERROR: " << e.what() << std::endl;
+		delete idx;
+		std::cerr << "ERROR: " << re.what() << std::endl;
 		system("pause");
 		return 1;
 	}

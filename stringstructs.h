@@ -18,8 +18,8 @@ inline static const struct dbStrings
     char dbTblDocsName[9] = "HTMLDocs";
     char dbTblWordsName[14] = "HTMLDocsWords";
     char dbTblIndexerName[12] = "HTMLIndexer";
-    char httpServerexec[15] = "httpserver.exe";
-    char httpServerERRmsg[28] = "httpserver.exe not started!";
+    char httpServerexec[21] = "WebSpider_Server.exe";
+    char httpServerERRmsg[30] = "WebSpider_Server not started!";
 } dbstr;
 
 inline static const struct INIStrings
@@ -32,7 +32,8 @@ inline static const struct INIStrings
     char useragent[25] = "RequestHeaders.useragent";
     char searchdepth[19] = "Search.SearchDepth";
     char StartURL[18] = "Search.StarterURL";
-    char ServerHost[12] = "Server.host";
-    char ServerPort[12] = "Server.port";
+    char ServerHost[21] = "WebSpiderServer.host";
+    char ServerPort[21] = "WebSpiderServer.port";
     char StartURLERR[89] = "Incorrect format parameter's StarterURL in WebSpider.ini. Format is: http(s)://domain.xx";
+    char INIFile[14] = "WebSpider.ini";
 } inistr;
