@@ -20,16 +20,23 @@ void thread_pool::work(const std::string& connstr, std::map<std::string, Link>& 
 	pqxx::connection* dbcon{ nullptr };
 	Indexer* idx{ nullptr };
 	http_request* httpreq{ nullptr };
+	try
+	{
+		dbcon = new pqxx::connection(connstr);
+		idx = new Indexer();
+		httpreq = new http_request();
 
-	dbcon = new pqxx::connection(connstr);
-	idx = new Indexer();
-	httpreq = new http_request();
-
-	this->safeq.pop(maplink, m, idx, dbcon, httpreq, wordsdbName, docsdbName, indexdbName);
-	dbcon->close();
-	delete dbcon; delete idx; delete httpreq;
-	++emrg_exit_counter;
-	(emrg_exit_counter == std::thread::hardware_concurrency() && !safeq.get_exit_status()) ? mcv->notify_one() : false;
+		this->safeq.pop(maplink, m, idx, dbcon, httpreq, wordsdbName, docsdbName, indexdbName);
+		dbcon->close();
+		delete dbcon; delete idx; delete httpreq;
+		++emrg_exit_counter;
+		(emrg_exit_counter == std::thread::hardware_concurrency() && !safeq.get_exit_status()) ? mcv->notify_one() : false;
+	}
+	catch (const std::runtime_error& re)
+	{
+		delete dbcon; delete idx; delete httpreq;
+		std::cerr << "ThreadPool ERROR: " << re.what() << std::endl;
+	}
 }
 
 void thread_pool::submit(std::pair<std::string, Link>& pt)
