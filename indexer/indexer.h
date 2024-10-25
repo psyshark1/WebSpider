@@ -4,7 +4,7 @@
 #include <boost/locale.hpp>
 #include <iostream>
 #include"http_utils.h"
-#include"lnk.h"
+#include "lnk.h"
 
 class Indexer
 {

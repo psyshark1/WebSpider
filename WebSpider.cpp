@@ -1,7 +1,7 @@
 ﻿#pragma once
-#include"stringstructs.h"
-#include"INI_parser.h"
-#include"thread_pool.h"
+#include "stringstructs.h"
+#include "INI_parser.h"
+#include "thread_pool.h"
 #include <tlhelp32.h>
 
 //std::atomic<unsigned>idword{ 1 };
@@ -46,6 +46,7 @@ int main()
 	ZeroMemory(&si, sizeof(si));
 	si.cb = sizeof(si);
 	ZeroMemory(&pi, sizeof(pi));
+	bool WebSpider_S{ false };
 
 	Indexer* idx{ nullptr };
 	try
@@ -84,6 +85,11 @@ int main()
 			}
 			else
 			{
+				long port = starturl.find(":", sls + 3);
+				if (port > -1)
+				{
+					starturl.erase(port, starturl.find("/", port) - port);
+				}
 				long dot = starturl.find(".", sls);
 				if(dot == -1){ throw std::runtime_error(inistr.StartURLERR); }
 				long sl = starturl.find('/', sls+3);
@@ -145,9 +151,10 @@ int main()
 					dbstr.dbTblDocsName + ' ' + dbstr.dbTblWordsName + ' ' + dbstr.dbTblIndexerName;*/
 				if (!getWinHandle(dbstr.httpServerexec))
 				{
-					if (!CreateProcess(dbstr.httpServerexec, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))//&startserver.front()
+					WebSpider_S = CreateProcess(dbstr.httpServerexec, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+					if (!WebSpider_S)//&startserver.front()
 					{
-						throw std::runtime_error(dbstr.httpServerERRmsg);
+						std::cerr << "WebSpider_Server ERROR: WebSpider_Server not started!" << std::endl << "Database word search is not possible." << std::endl;
 					}
 				}
 				if (searchdepth > 1)
@@ -202,13 +209,20 @@ int main()
 				pqxx::result rs1 = nw.exec("SELECT COUNT(id) FROM " + std::string(dbstr.dbTblWordsName));
 				nw.exec("commit;");
 
-				std::cout << "Parsing Complete" << std::endl << "Found " << rs1[0][0].as<unsigned>() << " word(s) in " << rs[0][0].as<unsigned>() << " HTML Document(s)" << std::endl
-					<< "Open browser and connect to http://" << serverHost << ":" << serverPort << " to see the web server operating" << std::endl;
+				std::cout << "Parsing Complete" << std::endl << "Found " << rs1[0][0].as<unsigned>() << " word(s) in " << rs[0][0].as<unsigned>() << " HTML Document(s)" << std::endl;
 
-				WaitForSingleObject(pi.hProcess, INFINITE);
+				if (WebSpider_S)
+				{
+					std::cout << "Open browser and connect to http://" << serverHost << ":" << serverPort << " to see the web server operating" << std::endl;
+					WaitForSingleObject(pi.hProcess, INFINITE);
 
-				CloseHandle(pi.hProcess);
-				CloseHandle(pi.hThread);
+					CloseHandle(pi.hProcess);
+					CloseHandle(pi.hThread);
+				}
+				else
+				{
+					std::cout << "Try running the WebSpider_Server program manually to search for the words found." << std::endl;
+				}
 			}
 		}
 		else

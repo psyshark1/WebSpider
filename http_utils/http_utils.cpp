@@ -1,5 +1,5 @@
 #pragma once 
-#include"http_utils.h"
+#include "http_utils.h"
 
 http_request::http_request()
 {
@@ -176,11 +176,21 @@ inline Link http_request::redirect(http::response<http::dynamic_body>& res, cons
 	long sls = loc.find("://", 0);
 	if (sls == -1)
 	{
+		long port = loc.find(":", 0);
+		if (port > -1)
+		{
+			loc.erase(port, loc.find("/", port) - port);
+		}
 		lnk.hostName = link.hostName;
 		lnk.query = loc;
 	}
 	else
 	{
+		long port = loc.find(":", sls+3);
+		if (port > -1)
+		{
+			loc.erase(port, loc.find("/", port) - port);
+		}
 		long dot = loc.find(".", sls);
 		if (dot == -1) { throw std::runtime_error("No domain dot separate!");}
 		long sl = loc.find('/', sls + 3);

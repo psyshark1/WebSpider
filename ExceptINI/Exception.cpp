@@ -1,4 +1,4 @@
-#include"Exception.h"
+#include "Exception.h"
 
 std::string WrongINI::what()
 {

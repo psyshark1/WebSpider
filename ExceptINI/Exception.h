@@ -1,5 +1,5 @@
 #pragma once
-#include<stdexcept>
+#include <stdexcept>
 const static class WrongINI
 {
 public:

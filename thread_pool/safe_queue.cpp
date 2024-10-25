@@ -1,8 +1,8 @@
 #pragma once
-#include<mutex>
-#include<queue>
-#include<condition_variable>
-#include"indexer.h"
+#include <mutex>
+#include <queue>
+#include <condition_variable>
+#include "indexer.h"
 
 #ifndef MAX_DBERRORS
 #define MAX_DBERRORS 5
