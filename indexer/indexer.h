@@ -1,10 +1,18 @@
 #pragma once
-#include<regex>
+#include <regex>
 #include <pqxx/pqxx>
 #include <boost/locale.hpp>
 #include <iostream>
-#include"http_utils.h"
+#include "http_utils.h"
 #include "lnk.h"
+
+#ifndef MIN_WORD_LENGTH
+#define MIN_WORD_LENGTH 3
+#endif
+
+#ifndef MAX_WORD_LENGTH
+#define MAX_WORD_LENGTH 32
+#endif
 
 class Indexer
 {

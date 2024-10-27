@@ -194,11 +194,12 @@ void Indexer::create_wordsbase() noexcept
 	{
 		if (HtmlContent[i] == 32)
 		{
-			if (buf.size() > 3 && buf.size() < 31)
+			if (buf.size() >= MIN_WORD_LENGTH && buf.size() <= MAX_WORD_LENGTH)
 			{
 				(!words.count(buf)) ? words[buf] = 1 : words[buf] += 1;
 			}
 			buf.clear();
+			buf.shrink_to_fit();
 		}
 		else if (!((HtmlContent[i] >= 0 && HtmlContent[i] < 32) ||
 			(HtmlContent[i] > 32 && HtmlContent[i] < 48) ||
@@ -206,10 +207,10 @@ void Indexer::create_wordsbase() noexcept
 			(HtmlContent[i] > 90 && HtmlContent[i] < 97) ||
 			(HtmlContent[i] > 122 && HtmlContent[i] < 128)))
 		{
-			buf.push_back(HtmlContent[i]);
+			(buf.size() <= MAX_WORD_LENGTH) ? buf.push_back(HtmlContent[i]) : false;
 		}
 	}
-	if (!words.size() && (buf.size() > 3 && buf.size() < 31))
+	if (!words.size() && (buf.size() >= MIN_WORD_LENGTH && buf.size() <= MAX_WORD_LENGTH))
 	{
 		words[buf] = 1;
 	}
